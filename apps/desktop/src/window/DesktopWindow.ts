@@ -30,6 +30,7 @@ import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import {
+  DISPLAY_CHANGED_CHANNEL,
   MENU_ACTION_CHANNEL,
   QUIT_SHORTCUT_CHANNEL,
   SNAP_SHOT_EVENT_CHANNEL,
@@ -897,6 +898,21 @@ export const make = Effect.gen(function* () {
       window.on("leave-full-screen", () => {
         syncMacosWindowButtons(window);
         window.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, false);
+      });
+      let displayId = Electron.screen.getDisplayMatching(window.getBounds()).id;
+      const notifyDisplayChange = () => {
+        if (window.isDestroyed()) return;
+        displayId = Electron.screen.getDisplayMatching(window.getBounds()).id;
+        window.webContents.send(DISPLAY_CHANGED_CHANNEL);
+      };
+      window.on("moved", () => {
+        if (window.isDestroyed()) return;
+        if (Electron.screen.getDisplayMatching(window.getBounds()).id !== displayId)
+          notifyDisplayChange();
+      });
+      Electron.screen.on("display-metrics-changed", notifyDisplayChange);
+      window.once("closed", () => {
+        Electron.screen.removeListener("display-metrics-changed", notifyDisplayChange);
       });
     }
 

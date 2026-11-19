@@ -74,10 +74,16 @@ export const deviceStreamScreenAtom = Atom.family((viewId: string) =>
   Atom.make<DeviceScreenSize | null>(null).pipe(Atom.withLabel(`device-stream-screen:${viewId}`)),
 );
 
+/** The session one view streams, null while it streams nothing. Reading it does not keep the stream alive. */
+export const deviceViewSessionAtom = Atom.family((viewId: string) =>
+  Atom.make<DeviceStreamSession | null>(null).pipe(Atom.withLabel(`device-view-session:${viewId}`)),
+);
+
 /** A device's video and input connection, live while a view reads it. */
 export const deviceStreamSessionAtom = Atom.family((key: DeviceStreamKey) =>
   Atom.make((get): DeviceStreamSession => {
     const screenAtom = deviceStreamScreenAtom(key.viewId);
+    const viewSessionAtom = deviceViewSessionAtom(key.viewId);
     const canvas = document.createElement("canvas");
     canvas.style.display = "block";
     canvas.style.width = "100%";
@@ -90,6 +96,7 @@ export const deviceStreamSessionAtom = Atom.family((key: DeviceStreamKey) =>
       state = { ...state, ...patch };
       session = { ...session, state };
       get.setSelf(session);
+      get.set(viewSessionAtom, session);
     };
     const client = createDeviceStreamClient(
       {
@@ -141,6 +148,7 @@ export const deviceStreamSessionAtom = Atom.family((key: DeviceStreamKey) =>
     get.addFinalizer(() => {
       client.stop();
       get.registry.set(screenAtom, null);
+      get.registry.set(viewSessionAtom, null);
     });
     client.start();
     return session;

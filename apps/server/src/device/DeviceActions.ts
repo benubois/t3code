@@ -2,6 +2,7 @@
 import {
   type DeviceActionInput,
   type DeviceActionType,
+  type DeviceDisplayDensity,
   type DeviceForegroundApp,
   DeviceOperationError,
   DeviceActionUnavailableError,
@@ -479,6 +480,100 @@ export const readDeviceDetail = Effect.fn("DeviceActions.readDetail")(function* 
 
 const quiet = <A, E>(effect: Effect.Effect<A, E>) =>
   effect.pipe(Effect.orElseSucceed((): A | undefined => undefined));
+
+const SimctlDevices = Schema.Struct({
+  devices: Schema.Record(
+    Schema.String,
+    Schema.Array(
+      Schema.Struct({ udid: Schema.String, deviceTypeIdentifier: Schema.optional(Schema.String) }),
+    ),
+  ),
+});
+const SimctlDeviceTypes = Schema.Struct({
+  devicetypes: Schema.Array(
+    Schema.Struct({ identifier: Schema.String, bundlePath: Schema.String }),
+  ),
+});
+const SimulatorCapabilities = Schema.Struct({
+  capabilities: Schema.Struct({
+    displays: Schema.Array(
+      Schema.Struct({
+        screenID: Schema.Number,
+        displayType: Schema.String,
+        scale: Schema.Number,
+        hdpi: Schema.Number,
+      }),
+    ),
+  }),
+});
+const decodeJson = <S extends Schema.Top>(schema: S) =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(schema));
+
+/**
+ * A simulator's name is whatever the user typed, so its displays come from the device type's
+ * profile, which lists each built-in display's scale and density by the id the stream reports.
+ */
+const readIosDisplays = Effect.fn("DeviceActions.readIosDisplays")(function* (
+  run: Runner,
+  udid: string,
+) {
+  const json = (args: ReadonlyArray<string>, operation: string) =>
+    run(args[0]!, args.slice(1)).pipe(Effect.flatMap(ok(operation)));
+  const devices = yield* json(["xcrun", "simctl", "list", "devices", "-j"], "list devices").pipe(
+    Effect.flatMap(decodeJson(SimctlDevices)),
+  );
+  const type = Object.values(devices.devices)
+    .flat()
+    .find((device) => device.udid === udid)?.deviceTypeIdentifier;
+  if (!type) return [];
+  const types = yield* json(["xcrun", "simctl", "list", "devicetypes", "-j"], "list types").pipe(
+    Effect.flatMap(decodeJson(SimctlDeviceTypes)),
+  );
+  const bundle = types.devicetypes.find((entry) => entry.identifier === type)?.bundlePath;
+  if (!bundle) return [];
+  const profile = yield* json(
+    ["plutil", "-convert", "json", "-o", "-", `${bundle}/Contents/Resources/capabilities.plist`],
+    "read device type",
+  ).pipe(Effect.flatMap(decodeJson(SimulatorCapabilities)));
+  return profile.capabilities.displays
+    .filter((display) => display.displayType === "integrated")
+    .map((display): DeviceDisplayDensity => ({
+      screenId: display.screenID,
+      scale: display.scale,
+      ppi: display.hdpi,
+    }));
+});
+
+// `DisplayInfo` prints the logical density, including a Display size override, then the panel's dpi.
+const ANDROID_DISPLAY_INFO = /density (\d+) \(([\d.]+) x ([\d.]+)\) dpi/;
+
+const readAndroidDisplays = Effect.fn("DeviceActions.readAndroidDisplays")(function* (
+  run: Runner,
+  serial: string,
+) {
+  const out = yield* adb(run, serial, ["shell", "dumpsys", "display"], "dumpsys display");
+  const override = out.indexOf("mOverrideDisplayInfo=DisplayInfo{");
+  const match =
+    ANDROID_DISPLAY_INFO.exec(override === -1 ? out : out.slice(override)) ??
+    ANDROID_DISPLAY_INFO.exec(out);
+  if (!match) return [];
+  const density = Number(match[1]);
+  const ppi = (Number(match[2]) + Number(match[3])) / 2;
+  if (!(density > 0 && ppi > 0)) return [];
+  return [{ scale: density / 160, ppi } satisfies DeviceDisplayDensity];
+});
+
+/** An unreadable density is empty; clients then fall back to the device name. */
+export const readDeviceDisplays = Effect.fn("DeviceActions.readDisplays")(function* (
+  run: Runner,
+  platform: DevicePlatform,
+  deviceId: string,
+): Effect.fn.Return<ReadonlyArray<DeviceDisplayDensity>> {
+  const none = (): ReadonlyArray<DeviceDisplayDensity> => [];
+  return platform === "ios"
+    ? yield* readIosDisplays(run, deviceId).pipe(Effect.orElseSucceed(none))
+    : yield* readAndroidDisplays(run, deviceId).pipe(Effect.orElseSucceed(none));
+});
 
 const readIos = Effect.fn("DeviceActions.readIos")(function* (
   ready: DeviceHostReady,

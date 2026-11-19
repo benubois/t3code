@@ -21,6 +21,17 @@ Devices run on the environment's server machine (or an SSH/Simlock device host):
 
 Restart the environment server after installing SDK tools or changing `PATH` / `SERVE_EMU_FFMPEG`.
 
+## Size & Pose
+
+**Size & Pose** sets how large the flat screen is drawn: **Fit** fills the panel,
+**Point accurate** shows one device point per point on your display, **Pixel
+accurate** maps device pixels to your display's pixels, and **Physical size**
+matches the real device's dimensions. Physical size needs the desktop app on
+macOS. Zoom scales any of these, and T3 remembers the choice for each device
+model. Any size other than Fit at 100% turns off the 3D view. The same section
+rotates the device and, on iPhone Duo, opens, folds, or stands it, so you can
+change its pose while the screen is drawn at an accurate size.
+
 ## Agents and devices
 
 Enable **Settings → Devices → Agents can use devices** so agents can drive devices through `agent-device` (restart existing agent sessions after enabling). First iOS tap builds a small test runner once per server (~2 minutes).

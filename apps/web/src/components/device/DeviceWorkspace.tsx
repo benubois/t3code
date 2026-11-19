@@ -2,16 +2,26 @@ import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m } from "~/i18n/messages";
 import * as Schema from "effect/Schema";
 import type { DeviceHostSummary, DeviceSummary, EnvironmentId } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { useGT } from "gt-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import {
   captureDeviceScreenshot,
   DeviceScreenshotError,
 } from "@t3tools/client-runtime/device/screenshot";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { refreshDeviceHubAccess, useDeviceHubAccess } from "~/state/device";
 import { DeviceControlsRail } from "./DeviceControlsRail";
 import { DeviceStreamView } from "./DeviceStreamView";
 import { DeviceToolsPanel } from "./DeviceToolsPanel";
+import {
+  DEFAULT_DEVICE_SIZING,
+  DeviceSizing,
+  deviceSizingStorageKey,
+  resolveDeviceDisplayMetrics,
+} from "./deviceSizing.logic";
+import { deviceViewSessionAtom } from "./deviceStreamSession";
+import { useHostDisplay } from "./useHostDisplay";
 import { useDeviceControls } from "./useDeviceControls";
 
 const isDeviceScreenshotError = Schema.is(DeviceScreenshotError);
@@ -37,12 +47,26 @@ export function DeviceWorkspace(props: {
   // A capture always finishes, even if the panel hides or closes meanwhile; the user asked for it.
   const capturing = useRef(false);
   const access = useDeviceHubAccess(props.environmentId, props.device.hostId);
+  const viewId = useId();
+  const stream = useAtomValue(deviceViewSessionAtom(viewId));
+  const [sizing, setSizing] = useLocalStorage(
+    deviceSizingStorageKey(props.device.platform, props.device.name),
+    DEFAULT_DEVICE_SIZING,
+    DeviceSizing,
+  );
+  const hostDisplay = useHostDisplay(toolsOpen || sizing.mode === "physical");
   // Settings and tools run commands on the device's own machine, which Expo and Simlock do not expose.
   const runsHostCommands = props.hostKind === "local" || props.hostKind === "ssh";
   const controls = useDeviceControls({
     ...props,
     access,
     visible: props.visible && runsHostCommands,
+  });
+  const metrics = resolveDeviceDisplayMetrics({
+    platform: props.device.platform,
+    name: props.device.name,
+    screen: stream?.state.screen ?? null,
+    displays: controls.detail?.displays,
   });
   const saveScreenshot = () => {
     if (!access || capturing.current || !props.visible) return;
@@ -96,6 +120,8 @@ export function DeviceWorkspace(props: {
             visible={props.visible}
             serveSimOnly={props.hostKind === "simlock"}
             axOverlay={axOverlay}
+            viewId={viewId}
+            sizing={{ value: sizing, host: hostDisplay, metrics }}
             allowPhoneView
             renderControls={(view) => (
               <DeviceControlsRail
@@ -124,6 +150,11 @@ export function DeviceWorkspace(props: {
           access={access}
           axOverlay={axOverlay}
           onAxOverlayChange={setAxOverlay}
+          sizing={sizing}
+          onSizingChange={setSizing}
+          stream={stream}
+          metrics={metrics}
+          hostDisplay={hostDisplay}
           onClose={() => setToolsOpen(false)}
           className="absolute inset-y-0 right-0 z-10 w-full max-w-72 border-l shadow-lg @[700px]:static @[700px]:w-72 @[700px]:shrink-0 @[700px]:shadow-none"
         />

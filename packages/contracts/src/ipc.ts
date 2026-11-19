@@ -120,6 +120,15 @@ export const DesktopAppBrandingSchema = Schema.Struct({
   displayName: Schema.String,
 });
 
+/** The physical size of the display holding the window, with its size in points (DIPs). */
+export const DesktopDisplayPhysicalSizeSchema = Schema.Struct({
+  widthMm: Schema.Number,
+  heightMm: Schema.Number,
+  widthPoints: Schema.Number,
+  heightPoints: Schema.Number,
+});
+export type DesktopDisplayPhysicalSize = typeof DesktopDisplayPhysicalSizeSchema.Type;
+
 export const DesktopSnapShotMode = Schema.Literals(["direct", "portal", "unavailable"]);
 export type DesktopSnapShotMode = typeof DesktopSnapShotMode.Type;
 
@@ -1220,6 +1229,10 @@ export interface DesktopBridge {
   getWindowFullscreenState: () => boolean;
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
   getWindowZoomFactor: () => number;
+  /** macOS only; null when the display does not report its size. Optional for older desktop builds. */
+  getDisplayPhysicalSize?: () => Promise<DesktopDisplayPhysicalSize | null>;
+  /** Fires when the window moves to another display or a display's resolution changes. */
+  onDisplayChange?: (listener: () => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   /** `minimumVersion` is a track switch's checked release; nothing older is offered after. */
   setUpdateChannel: (

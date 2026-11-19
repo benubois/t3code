@@ -322,6 +322,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getWindowFullscreenState: () =>
     ipcRenderer.sendSync(IpcChannels.GET_WINDOW_FULLSCREEN_STATE_CHANNEL) === true,
   getWindowZoomFactor: () => webFrame.getZoomFactor(),
+  getDisplayPhysicalSize: () => ipcRenderer.invoke(IpcChannels.GET_DISPLAY_PHYSICAL_SIZE_CHANNEL),
+  onDisplayChange: (listener) => {
+    const wrappedListener = () => listener();
+    ipcRenderer.on(IpcChannels.DISPLAY_CHANGED_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.DISPLAY_CHANGED_CHANNEL, wrappedListener);
+    };
+  },
   onWindowFullscreenStateChange: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, fullscreen: unknown) => {
       if (typeof fullscreen !== "boolean") return;

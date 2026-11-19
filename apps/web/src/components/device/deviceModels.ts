@@ -17,8 +17,13 @@ const models: Record<DeviceModelSource["id"], DeviceModelSource> = {
   "ipad-pro-13-m5": { id: "ipad-pro-13-m5", url: ipadPro13M5 },
 };
 
-export function deviceModel(platform: DevicePlatform, name: string): DeviceModelSource | null {
-  const id = resolveDeviceModelId(platform, name);
+/** `hinged`: the stream reports a hinge, which on iOS only the iPhone Duo has, so renamed ones still resolve. */
+export function deviceModel(
+  platform: DevicePlatform,
+  name: string,
+  hinged = false,
+): DeviceModelSource | null {
+  const id = platform === "ios" && hinged ? "iphone-duo" : resolveDeviceModelId(platform, name);
   return id ? models[id] : null;
 }
 

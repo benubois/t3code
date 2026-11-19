@@ -37,6 +37,11 @@ it("keeps a typed URL until opening it succeeds", async () => {
       access={null}
       axOverlay={false}
       onAxOverlayChange={() => {}}
+      sizing={{ mode: "fit", zoom: 1 }}
+      onSizingChange={() => {}}
+      stream={null}
+      metrics={null}
+      hostDisplay={{ devicePixelRatio: 1, zoomFactor: 1, cssPxPerMm: "unsupported" }}
       onClose={() => {}}
     />,
   );

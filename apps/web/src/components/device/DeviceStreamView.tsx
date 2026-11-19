@@ -10,6 +10,14 @@ import { renewDeviceHubAccess, useDeviceHubAccess } from "~/state/device";
 import { resolveDeviceShape } from "@t3tools/client-runtime/device/shape-profile";
 import { deviceKeyboard, deviceModel } from "./deviceModels";
 import { fitDeviceFrame } from "./deviceFrameLayout";
+import {
+  isDeviceSized,
+  orientedScreenSize,
+  sizeDeviceScreen,
+  type DeviceDisplayMetrics,
+  type DeviceSizing,
+  type HostDisplay,
+} from "./deviceSizing.logic";
 import { DeviceDuoViewport } from "./DeviceDuoViewport";
 import { DeviceDuoControls } from "./DeviceDuoControls";
 import { DeviceAndroidFoldControls } from "./DeviceAndroidFoldControls";
@@ -37,15 +45,8 @@ const CONTROLS_RAIL_WIDTH = 56;
 
 function screenAspect(platform: DevicePlatform, screen: DeviceScreenSize | null): number {
   if (!screen) return platform === "ios" ? 9 / 19.5 : 9 / 20;
-  const landscape =
-    screen.orientation === "landscape_left" || screen.orientation === "landscape_right";
-  const w = landscape
-    ? Math.max(screen.width, screen.height)
-    : Math.min(screen.width, screen.height);
-  const h = landscape
-    ? Math.min(screen.width, screen.height)
-    : Math.max(screen.width, screen.height);
-  return w / h;
+  const { width, height } = orientedScreenSize(screen);
+  return width / height;
 }
 
 // serve-sim sends raw portrait framebuffers even when iOS reports landscape; rotate the display.
@@ -96,9 +97,13 @@ export function DeviceStreamView(props: {
   readonly viewId?: string;
   /** The host serves only serve-sim's stream and input socket (Simlock). */
   readonly serveSimOnly?: boolean;
+  /** Omitted, the flat screen fits the view. */
+  readonly sizing?: {
+    readonly value: DeviceSizing;
+    readonly host: HostDisplay;
+    readonly metrics: DeviceDisplayMetrics | null;
+  };
 }) {
-  const model = deviceModel(props.platform, props.deviceName ?? "");
-  const isDuo = model?.id === "iphone-duo";
   const gt = useGT();
   const [presentation, setPresentation] = useState<"phone" | "flat">("phone");
   const [keyboardAttached, setKeyboardAttached] = useState(false);
@@ -132,6 +137,9 @@ export function DeviceStreamView(props: {
   const { status, detail, hasFrame, screen, mjpegUrl, mjpegGeneration, duoControl } =
     session?.state ?? IDLE_DEVICE_STREAM_STATE;
   const inputState = session?.state.input ?? IDLE_DEVICE_STREAM_STATE.input;
+  const hinged = screen?.supportsHingeAngle === true;
+  const model = deviceModel(props.platform, props.deviceName ?? "", hinged);
+  const isDuo = model?.id === "iphone-duo";
   const phoneUnavailable = session?.state.phoneUnavailable ?? false;
   const foldAngle = useAtomValue(
     androidFoldViewAtom(deviceScreenKey(props.environmentId, props.hostId, props.deviceId)),
@@ -148,6 +156,8 @@ export function DeviceStreamView(props: {
   };
 
   const aspect = screenAspect(props.platform, screen);
+  const sizing = props.sizing;
+  const sized = sizing !== undefined && isDeviceSized(sizing.value, sizing.metrics, sizing.host);
 
   const retainingFrame =
     status === "connecting" && hasFrame && inputState.connected && screen !== null;
@@ -159,6 +169,7 @@ export function DeviceStreamView(props: {
     !phoneUnavailable &&
     !mjpegUrl &&
     !props.axOverlay &&
+    !sized &&
     (!isDuo || screen?.supportsHingeAngle === true);
   const controlsInset = props.renderControls && !showPhone ? CONTROLS_RAIL_WIDTH : 0;
 
@@ -177,7 +188,16 @@ export function DeviceStreamView(props: {
     update();
     return observeResize(element, update);
   };
-  const frame = fitDeviceFrame(aspect, host.width, host.height, controlsInset);
+  const fit = fitDeviceFrame(aspect, host.width, host.height, controlsInset);
+  const frame = sizing
+    ? sizeDeviceScreen({
+        sizing: sizing.value,
+        screen: screen ? orientedScreenSize(screen) : null,
+        metrics: sizing.metrics,
+        host: sizing.host,
+        fit,
+      })
+    : fit;
 
   const rotation = screenRotation(props.platform, screen);
 
@@ -235,7 +255,9 @@ export function DeviceStreamView(props: {
           ? gt("3D requires the H.264 stream")
           : props.axOverlay
             ? gt("Turn off accessibility frames to use 3D")
-            : null;
+            : sized
+              ? gt("Set the size to Fit at 100% to use 3D")
+              : null;
 
   const keyboardSource = deviceKeyboard(props.platform, props.deviceName ?? "");
   const resetView = () => {
@@ -350,65 +372,80 @@ export function DeviceStreamView(props: {
           client?.sendKey(event.nativeEvent, "up");
         }}
       >
+        {/* Sized screens can outgrow the view, so the frame scrolls inside its own layer. */}
         <div
-          className={cn("relative select-none", showPhone && "invisible pointer-events-none")}
-          style={{ width: frame.width, height: frame.height }}
-          onPointerDown={(event) => {
-            if (event.button !== 0 || !inputState.connected || activePointer.current !== null)
-              return;
-            event.currentTarget.setPointerCapture(event.pointerId);
-            (event.currentTarget.parentElement as HTMLElement | null)?.focus();
-            const { x, y } = normalizedPoint(event);
-            activePointer.current = { id: event.pointerId, x, y };
-            client?.sendTouch("begin", x, y);
-          }}
-          onPointerMove={(event) => {
-            if (activePointer.current?.id !== event.pointerId) return;
-            const { x, y } = normalizedPoint(event);
-            activePointer.current = { id: event.pointerId, x, y };
-            client?.sendTouch("move", x, y);
-          }}
-          onPointerUp={endPointer}
-          onPointerCancel={endPointer}
-          onLostPointerCapture={endPointer}
+          className={cn(
+            "scrollbar-gutter-both absolute inset-y-0 left-0 flex",
+            controlsInset ? "right-14" : "right-0",
+            sized && "overflow-auto",
+            showPhone && "pointer-events-none",
+          )}
         >
           <div
-            ref={mountCanvas}
-            className={cn("absolute top-0 left-0", mjpegUrl && "hidden")}
-            style={mediaStyle}
-          />
-          {props.visible && access && mjpegUrl ? (
-            <img
-              key={mjpegGeneration}
-              ref={attachMjpegImage}
-              alt=""
-              draggable={false}
-              className="absolute top-0 left-0 object-contain"
+            className={cn(
+              "relative m-auto shrink-0 select-none",
+              // The scroll layer would otherwise take touch drags meant for the device as pans.
+              sized && "touch-none",
+              showPhone && "invisible pointer-events-none",
+            )}
+            style={{ width: frame.width, height: frame.height }}
+            onPointerDown={(event) => {
+              if (event.button !== 0 || !inputState.connected || activePointer.current !== null)
+                return;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              event.currentTarget.closest<HTMLElement>("[role='application']")?.focus();
+              const { x, y } = normalizedPoint(event);
+              activePointer.current = { id: event.pointerId, x, y };
+              client?.sendTouch("begin", x, y);
+            }}
+            onPointerMove={(event) => {
+              if (activePointer.current?.id !== event.pointerId) return;
+              const { x, y } = normalizedPoint(event);
+              activePointer.current = { id: event.pointerId, x, y };
+              client?.sendTouch("move", x, y);
+            }}
+            onPointerUp={endPointer}
+            onPointerCancel={endPointer}
+            onLostPointerCapture={endPointer}
+          >
+            <div
+              ref={mountCanvas}
+              className={cn("absolute top-0 left-0", mjpegUrl && "hidden")}
               style={mediaStyle}
             />
-          ) : null}
-          {axElements.length > 0 ? (
-            <div className="pointer-events-none absolute inset-0" aria-hidden>
-              {axElements.map((element) => (
-                <div
-                  key={element.id}
-                  className="absolute border border-info/80 bg-info/10"
-                  style={{
-                    left: `${element.x * 100}%`,
-                    top: `${element.y * 100}%`,
-                    width: `${element.width * 100}%`,
-                    height: `${element.height * 100}%`,
-                  }}
-                >
-                  {element.label ? (
-                    <span className="absolute -top-3.5 left-0 max-w-full truncate rounded-sm bg-info px-1 text-3xs leading-3.5 text-white">
-                      {element.label}
-                    </span>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : null}
+            {props.visible && access && mjpegUrl ? (
+              <img
+                key={mjpegGeneration}
+                ref={attachMjpegImage}
+                alt=""
+                draggable={false}
+                className="absolute top-0 left-0 object-contain"
+                style={mediaStyle}
+              />
+            ) : null}
+            {axElements.length > 0 ? (
+              <div className="pointer-events-none absolute inset-0" aria-hidden>
+                {axElements.map((element) => (
+                  <div
+                    key={element.id}
+                    className="absolute border border-info/80 bg-info/10"
+                    style={{
+                      left: `${element.x * 100}%`,
+                      top: `${element.y * 100}%`,
+                      width: `${element.width * 100}%`,
+                      height: `${element.height * 100}%`,
+                    }}
+                  >
+                    {element.label ? (
+                      <span className="absolute -top-3.5 left-0 max-w-full truncate rounded-sm bg-info px-1 text-3xs leading-3.5 text-white">
+                        {element.label}
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
         {session && showPhone && isDuo && model ? (
           <DeviceDuoViewport
@@ -428,7 +465,7 @@ export function DeviceStreamView(props: {
         ) : session && showPhone ? (
           <DevicePhoneViewport
             profile={profile}
-            model={deviceModel(props.platform, props.deviceName ?? "")}
+            model={model}
             accessory={keyboardAttached ? keyboardSource : null}
             source={session.canvas}
             onFrameListener={session.setFrameListener}

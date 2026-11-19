@@ -10,6 +10,7 @@ import type { DeviceScreenSize } from "@t3tools/client-runtime/device/stream";
 import { DeviceDuoGlyph } from "./DeviceDuoGlyph";
 import { Button } from "~/components/ui/button";
 import { SharedTooltipTrigger } from "~/components/ui/shared-tooltip";
+import { cn } from "~/lib/utils";
 
 const FOLDS = [
   { id: "closed", angle: 0 },
@@ -26,10 +27,14 @@ export function DeviceDuoControls(props: {
   state: DuoControlState;
   enabled: boolean;
   onCommand: (command: DuoCommand) => void;
+  /** The tools panel lays the groups out in a row; the rail stacks them. */
+  layout?: "rail" | "row";
 }) {
   const { screen } = props;
   const gt = useGT();
   const m = useMessages();
+  const row = props.layout === "row";
+  const tooltipSide = row ? "top" : "left";
   const { fold, stand, phoneVertical: reportedVertical, settled } = duoFoldState(screen);
   const [settledVertical, setSettledVertical] = useState(reportedVertical);
   if (settled && settledVertical !== reportedVertical) setSettledVertical(reportedVertical);
@@ -67,15 +72,20 @@ export function DeviceDuoControls(props: {
         />
       }
       label={label}
-      side="left"
+      side={tooltipSide}
     >
       {glyph}
     </SharedTooltipTrigger>
   );
-  const group =
-    "pointer-events-auto flex shrink-0 flex-col items-center gap-1 rounded-full border border-border/50 bg-background/80 p-1 shadow-sm";
+  const group = cn(
+    "pointer-events-auto flex shrink-0 items-center gap-1 rounded-full border border-border/50 bg-background/80 p-1 shadow-sm",
+    row ? "flex-row" : "flex-col",
+  );
   return (
-    <div aria-label={gt("iPhone Duo stands")} className="flex flex-col items-center gap-2">
+    <div
+      aria-label={gt("iPhone Duo stands")}
+      className={cn("flex items-center gap-2", row ? "flex-row flex-wrap" : "flex-col")}
+    >
       <div role="group" aria-label={gt("Fold shape")} className={group}>
         {FOLDS.map(({ id, angle: value }) =>
           button(
@@ -122,7 +132,7 @@ export function DeviceDuoControls(props: {
             </span>
           }
           label={props.state.error}
-          side="left"
+          side={tooltipSide}
         />
       ) : null}
     </div>

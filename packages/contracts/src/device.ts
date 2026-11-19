@@ -415,11 +415,23 @@ export const DeviceForegroundApp = Schema.Struct({
 });
 export type DeviceForegroundApp = typeof DeviceForegroundApp.Type;
 
+/** A display's density as its host reports it, independent of the device's name. */
+export const DeviceDisplayDensity = Schema.Struct({
+  /** iOS display id, matching the stream's `screenId`; absent where a device has one display. */
+  screenId: Schema.optional(Schema.Number),
+  /** Device pixels per point (iOS) or dp (Android). */
+  scale: Schema.Number,
+  ppi: Schema.Number,
+});
+export type DeviceDisplayDensity = typeof DeviceDisplayDensity.Type;
+
 export const DeviceDetail = Schema.Struct({
   hostId: DeviceHostId,
   deviceId: DeviceId,
   settings: DeviceSettings,
   foregroundApp: Schema.NullOr(DeviceForegroundApp),
+  /** Absent from older servers and from hosts that could not read it. */
+  displays: Schema.optional(Schema.Array(DeviceDisplayDensity)),
   readAt: Schema.String,
 });
 export type DeviceDetail = typeof DeviceDetail.Type;

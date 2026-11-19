@@ -3,6 +3,7 @@ import {
   ContextMenuSource,
   DesktopAppBrandingSchema,
   DatabaseMigrationProgress,
+  DesktopDisplayPhysicalSizeSchema,
   DesktopEnvironmentBootstrapSchema,
   DesktopMediaReadSchema,
   DesktopThemeSchema,
@@ -49,6 +50,7 @@ import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as Electron from "electron";
 import { msg } from "gt-i18n";
 import * as MacPermissions from "../../permissions/MacPermissions.ts";
+import { macDisplayMillimeters } from "../../window/DisplayPhysicalSize.ts";
 import { safariPermissionCheck } from "../../preview/BrowserImport/SafariPermission.ts";
 import { m } from "../../i18n/messages.ts";
 import * as IpcChannels from "../channels.ts";
@@ -516,6 +518,24 @@ export const revealWindow = DesktopIpc.makeIpcMethod({
       return;
     }
     yield* electronWindow.reveal(window.value);
+  }),
+});
+
+export const getDisplayPhysicalSize = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.GET_DISPLAY_PHYSICAL_SIZE_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.NullOr(DesktopDisplayPhysicalSizeSchema),
+  handler: Effect.fn("desktop.ipc.window.getDisplayPhysicalSize")(function* (_input, event) {
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    if (environment.platform !== "darwin" || event === undefined) return null;
+    const contents = Electron.webContents.fromId(event.sender.id);
+    const window = contents ? Electron.BrowserWindow.fromWebContents(contents) : null;
+    if (!window || window.isDestroyed()) return null;
+    const display = Electron.screen.getDisplayMatching(window.getBounds());
+    const size = yield* Effect.promise(() => macDisplayMillimeters(display.id));
+    return size
+      ? { ...size, widthPoints: display.size.width, heightPoints: display.size.height }
+      : null;
   }),
 });
 

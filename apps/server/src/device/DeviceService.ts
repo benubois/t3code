@@ -4,6 +4,7 @@ import {
   type DeviceConfigureInput,
   type DeviceDetail,
   type DeviceDetailInput,
+  type DeviceDisplayDensity,
   type DeviceError,
   DeviceHostId,
   DeviceId,
@@ -71,7 +72,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as ServerSettings from "../serverSettings.ts";
 import { isLocalSshDeviceHost, remoteSshDeviceHosts } from "./localSshDeviceHost.ts";
 
-import { readDeviceDetail, runDeviceAction } from "./DeviceActions.ts";
+import { readDeviceDetail, readDeviceDisplays, runDeviceAction } from "./DeviceActions.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as SecretResolverLayer from "../secrets/SecretResolver.ts";
@@ -407,6 +408,8 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
 
   // Readiness phases replace the shown detail; this restores an incomplete listing's cause once ready.
   const discoveryDetails = new Map<DeviceHostId, string>();
+  // A simulator keeps its device type for life, unlike an Android serial, which a new emulator can reuse.
+  const simulatorDisplays = new Map<string, ReadonlyArray<DeviceDisplayDensity>>();
 
   const setHostStatus = (
     hostId: DeviceHostId,
@@ -1024,12 +1027,26 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
   const detail: DeviceService["Service"]["detail"] = Effect.fn("DeviceService.detail")(
     function* (input) {
       const { ready, device } = yield* resolveDevice(input.hostId, input.deviceId);
-      const read = yield* readDeviceDetail(ready, device.platform, device.id);
+      const displayKey = `${ready.hostId}\0${device.id}`;
+      const cachedDisplays =
+        device.platform === "ios" ? simulatorDisplays.get(displayKey) : undefined;
+      const [read, displays] = yield* Effect.all(
+        [
+          readDeviceDetail(ready, device.platform, device.id),
+          cachedDisplays
+            ? Effect.succeed(cachedDisplays)
+            : readDeviceDisplays(ready.run, device.platform, device.id),
+        ],
+        { concurrency: 2 },
+      );
+      if (device.platform === "ios" && displays.length > 0)
+        simulatorDisplays.set(displayKey, displays);
       return {
         hostId: ready.hostId,
         deviceId: device.id,
         settings: read.settings,
         foregroundApp: read.foregroundApp,
+        ...(displays.length > 0 ? { displays } : {}),
         readAt: DateTime.formatIso(yield* DateTime.now),
       };
     },

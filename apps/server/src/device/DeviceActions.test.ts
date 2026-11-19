@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import { readDeviceDetail, runDeviceAction } from "./DeviceActions.ts";
+import { readDeviceDetail, readDeviceDisplays, runDeviceAction } from "./DeviceActions.ts";
 import type { DeviceHostReady } from "./DeviceHost.ts";
 
 type Call = { command: string; args: ReadonlyArray<string>; stdin?: string };
@@ -230,6 +230,88 @@ describe("readDeviceDetail", () => {
         networkEnabled: true,
       });
       expect(detail.foregroundApp).toEqual({ id: "com.example.app" });
+    }),
+  );
+});
+
+describe("readDeviceDisplays", () => {
+  it.effect("reads a renamed simulator's displays from its device type profile", () =>
+    Effect.gen(function* () {
+      const bundle =
+        "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone Duo.simdevicetype";
+      const { ready } = makeReady((call) => {
+        const key = [call.command, ...call.args].join(" ");
+        if (key === "xcrun simctl list devices -j")
+          return {
+            stdout: JSON.stringify({
+              devices: {
+                "com.apple.CoreSimulator.SimRuntime.iOS-27-1": [
+                  { udid: "OTHER", name: "iPhone 18 Pro" },
+                  {
+                    udid,
+                    name: "Reflex Duo",
+                    deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+                  },
+                ],
+              },
+            }),
+          };
+        if (key === "xcrun simctl list devicetypes -j")
+          return {
+            stdout: JSON.stringify({
+              devicetypes: [
+                {
+                  identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+                  bundlePath: bundle,
+                },
+              ],
+            }),
+          };
+        if (key === `plutil -convert json -o - ${bundle}/Contents/Resources/capabilities.plist`)
+          return {
+            stdout: JSON.stringify({
+              capabilities: {
+                displays: [
+                  { screenID: 1, displayType: "integrated", scale: 3, hdpi: 460 },
+                  { screenID: 3, displayType: "integrated", scale: 3, hdpi: 460 },
+                  { screenID: 2, displayType: "tvOut", scale: 1, hdpi: 72 },
+                ],
+              },
+            }),
+          };
+        return { code: 1 };
+      });
+      expect(yield* readDeviceDisplays(ready.run, "ios", udid)).toEqual([
+        { screenId: 1, scale: 3, ppi: 460 },
+        { screenId: 3, scale: 3, ppi: 460 },
+      ]);
+    }),
+  );
+
+  it.effect("reads Android's logical density and panel dpi, preferring the override", () =>
+    Effect.gen(function* () {
+      const { ready } = makeReady((call) =>
+        call.args.join(" ").endsWith("shell dumpsys display")
+          ? {
+              stdout: [
+                '  DisplayDeviceInfo{"Built-in Screen": uniqueId="local:0", 1080 x 2424, density 420, 409.432 x 411.891 dpi}',
+                '    mBaseDisplayInfo=DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2424, density 420 (409.432 x 411.891) dpi}',
+                '    mOverrideDisplayInfo=DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2424, density 480 (409.432 x 411.891) dpi}',
+              ].join("\n"),
+            }
+          : { code: 1 },
+      );
+      const [display] = yield* readDeviceDisplays(ready.run, "android", "emulator-5554");
+      expect(display?.scale).toBe(3);
+      expect(display?.ppi).toBeCloseTo(410.66, 2);
+    }),
+  );
+
+  it.effect("reads nothing when the host cannot say", () =>
+    Effect.gen(function* () {
+      const { ready } = makeReady(() => ({ code: 1, stderr: "boom" }));
+      expect(yield* readDeviceDisplays(ready.run, "ios", udid)).toEqual([]);
+      expect(yield* readDeviceDisplays(ready.run, "android", "emulator-5554")).toEqual([]);
     }),
   );
 });

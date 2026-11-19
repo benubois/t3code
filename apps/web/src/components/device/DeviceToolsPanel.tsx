@@ -1,6 +1,6 @@
 import type { DeviceHubAccess } from "@t3tools/client-runtime/state/deviceHubAccess";
 import type { DevicePermission, DeviceSummary, DeviceTextSize } from "@t3tools/contracts";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Minus, Plus, RotateCcw, X } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { useState } from "react";
@@ -21,6 +21,26 @@ import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
 import { cn } from "~/lib/utils";
 import type { DeviceControls } from "./useDeviceControls";
 import { deviceEventLogAtom } from "./deviceHubAtoms";
+import { DeviceDuoControls } from "./DeviceDuoControls";
+import type { DeviceStreamSession } from "./deviceStreamSession";
+import {
+  canStepDeviceZoom,
+  deviceScreenReadout,
+  deviceSizingAvailable,
+  orientedScreenSize,
+  stepDeviceZoom,
+  type DeviceDisplayMetrics,
+  type DeviceSizing,
+  type DeviceSizingMode,
+  type HostDisplay,
+} from "./deviceSizing.logic";
+
+const SIZING_MODES: ReadonlyArray<{ value: DeviceSizingMode; label: string }> = [
+  { value: "fit", label: msg("Fit", { $context: "device screen size mode, fills the panel" }) },
+  { value: "point", label: msg("Point accurate") },
+  { value: "pixel", label: msg("Pixel accurate") },
+  { value: "physical", label: msg("Physical size") },
+];
 
 const TEXT_SIZES: ReadonlyArray<{ value: DeviceTextSize; label: string }> = [
   { value: "small", label: msg("Small") },
@@ -88,6 +108,11 @@ export function DeviceToolsPanel(props: {
   readonly access: DeviceHubAccess | null;
   readonly axOverlay: boolean;
   readonly onAxOverlayChange: (enabled: boolean) => void;
+  readonly sizing: DeviceSizing;
+  readonly onSizingChange: (sizing: DeviceSizing) => void;
+  readonly stream: DeviceStreamSession | null;
+  readonly metrics: DeviceDisplayMetrics | null;
+  readonly hostDisplay: HostDisplay;
   readonly onClose: () => void;
   readonly className?: string;
 }) {
@@ -233,18 +258,7 @@ export function DeviceToolsPanel(props: {
                 />
               </Row>
             </>
-          ) : (
-            <Row label={gt("Orientation")}>
-              <ChoiceSelect
-                ariaLabel={gt("Orientation")}
-                value={null}
-                placeholder={gt("Rotate to…")}
-                options={ORIENTATIONS}
-                disabled={disabled}
-                onChange={(value) => act({ type: "setOrientation", value })}
-              />
-            </Row>
-          )}
+          ) : null}
           <SwitchRow
             label={gt("Reduce Motion")}
             checked={settings?.reduceMotion}
@@ -289,6 +303,27 @@ export function DeviceToolsPanel(props: {
             />
           )}
         </Section>
+
+        <SizeAndPoseSection
+          device={device}
+          sizing={props.sizing}
+          onChange={props.onSizingChange}
+          stream={props.stream}
+          metrics={props.metrics}
+          host={props.hostDisplay}
+          rotation={
+            isIos ? null : (
+              <ChoiceSelect
+                ariaLabel={gt("Rotation")}
+                value={null}
+                placeholder={gt("Rotate to…")}
+                options={ORIENTATIONS}
+                disabled={disabled}
+                onChange={(value) => act({ type: "setOrientation", value })}
+              />
+            )
+          }
+        />
 
         <Section title={gt("Accessibility")}>
           <SwitchRow
@@ -385,7 +420,11 @@ function SwitchRow(props: {
 function ChoiceSelect<V extends string>(props: {
   readonly ariaLabel: string;
   readonly value: V | null;
-  readonly options: ReadonlyArray<{ readonly value: V; readonly label: string }>;
+  readonly options: ReadonlyArray<{
+    readonly value: V;
+    readonly label: string;
+    readonly disabled?: boolean;
+  }>;
   readonly disabled: boolean;
   readonly placeholder?: string;
   readonly onChange: (value: V) => Promise<unknown>;
@@ -412,12 +451,134 @@ function ChoiceSelect<V extends string>(props: {
       </SelectTrigger>
       <SelectPopup align="end" alignItemWithTrigger={false}>
         {props.options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
             {m(option.label)}
           </SelectItem>
         ))}
       </SelectPopup>
     </Select>
+  );
+}
+
+function SizeAndPoseSection(props: {
+  readonly device: DeviceSummary;
+  readonly sizing: DeviceSizing;
+  readonly onChange: (sizing: DeviceSizing) => void;
+  readonly stream: DeviceStreamSession | null;
+  readonly metrics: DeviceDisplayMetrics | null;
+  readonly host: HostDisplay;
+  /** Android rotates through a host command; null rotates through the stream. */
+  readonly rotation: React.ReactNode;
+}) {
+  const { sizing, host, stream, metrics } = props;
+  const gt = useGT();
+  const screen = stream?.state.screen ?? null;
+  const inputConnected = stream?.state.input.connected === true;
+  const hinged = props.device.platform === "ios" && screen?.supportsHingeAngle === true;
+  const options = SIZING_MODES.map((option) => ({
+    ...option,
+    disabled: !deviceSizingAvailable(option.value, metrics, host),
+  }));
+  const readout = screen ? deviceScreenReadout(orientedScreenSize(screen), metrics) : null;
+  const pointUnit = props.device.platform === "ios" ? "pt" : "dp";
+  const zoomTo = (zoom: number) => props.onChange({ ...sizing, zoom });
+  const unavailableNote =
+    metrics === null
+      ? gt("This device's screen density is unknown, so only Fit and Pixel accurate are available.")
+      : host.cssPxPerMm === "unsupported"
+        ? gt("Physical size needs the desktop app on macOS.")
+        : host.cssPxPerMm === "unreported"
+          ? gt("This display doesn't report its physical size.")
+          : null;
+  return (
+    <Section
+      title={gt("Size & Pose", {
+        $context: "section heading for the device screen size, rotation, and fold",
+      })}
+    >
+      <Row label={gt("Scale", { $context: "noun, how the device screen is sized" })}>
+        <ChoiceSelect
+          ariaLabel={gt("Screen size")}
+          value={sizing.mode}
+          options={options}
+          disabled={false}
+          onChange={(mode) => {
+            props.onChange({ mode, zoom: 1 });
+            return Promise.resolve();
+          }}
+        />
+      </Row>
+      <Row label={gt("Zoom", { $context: "noun, the zoom level" })}>
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon-xs"
+            variant="outline"
+            aria-label={gt("Zoom out")}
+            disabled={!canStepDeviceZoom(sizing.zoom, "out")}
+            onClick={() => zoomTo(stepDeviceZoom(sizing.zoom, "out"))}
+          >
+            <Minus />
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            className="w-12"
+            title={gt("Reset zoom")}
+            disabled={sizing.zoom === 1}
+            onClick={() => zoomTo(1)}
+          >
+            <span className="tabular-nums">{`${Math.round(sizing.zoom * 100)}%`}</span>
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="outline"
+            aria-label={gt("Zoom in")}
+            disabled={!canStepDeviceZoom(sizing.zoom, "in")}
+            onClick={() => zoomTo(stepDeviceZoom(sizing.zoom, "in"))}
+          >
+            <Plus />
+          </Button>
+        </div>
+      </Row>
+      {readout ? (
+        <p className="text-xs text-muted-foreground tabular-nums">
+          {[
+            readout.points && readout.scale !== null
+              ? `${readout.points.width} × ${readout.points.height} ${pointUnit} @${Number(readout.scale.toFixed(2))}x`
+              : null,
+            `${readout.pixels.width} × ${readout.pixels.height} px`,
+            readout.diagonalInches !== null ? `${readout.diagonalInches.toFixed(1)}″` : null,
+          ]
+            .filter((part) => part !== null)
+            .join(" · ")}
+        </p>
+      ) : null}
+      {unavailableNote ? <p className="text-xs text-muted-foreground">{unavailableNote}</p> : null}
+      <Row label={gt("Rotation")}>
+        {props.rotation ?? (
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!inputConnected}
+            onClick={() => stream?.stream.rotate()}
+          >
+            <RotateCcw />
+            <T context="verb, turns the device a quarter turn">Rotate</T>
+          </Button>
+        )}
+      </Row>
+      {hinged && stream && screen ? (
+        <Row label={gt("Pose", { $context: "how a foldable phone is folded and stood" })}>
+          <DeviceDuoControls
+            layout="row"
+            screen={screen}
+            state={stream.state.duoControl}
+            enabled={inputConnected}
+            onCommand={stream.stream.controlDuo}
+          />
+        </Row>
+      ) : null}
+    </Section>
   );
 }
 
