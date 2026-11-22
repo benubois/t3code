@@ -1115,6 +1115,39 @@ export const DesktopAppleSpeechTranscribeInputSchema = Schema.Struct({
   pcm: Schema.Uint8Array,
 });
 
+export const DesktopDiffToolFileSchema = Schema.Struct({
+  /** Repository-relative; null for an added file. */
+  oldPath: Schema.NullOr(Schema.String),
+  /** Repository-relative; null for a deleted file. */
+  newPath: Schema.NullOr(Schema.String),
+  oldContents: Schema.String,
+  newContents: Schema.String,
+  editable: Schema.Boolean,
+});
+export type DesktopDiffToolFile = typeof DesktopDiffToolFileSchema.Type;
+
+export const DesktopDiffToolOpenInputSchema = Schema.Struct({
+  sessionId: Schema.String,
+  files: Schema.Array(DesktopDiffToolFileSchema),
+});
+export type DesktopDiffToolOpenInput = typeof DesktopDiffToolOpenInputSchema.Type;
+
+export const DesktopDiffToolOpenResultSchema = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true) }),
+  Schema.Struct({ ok: Schema.Literal(false), message: Schema.String }),
+]);
+export type DesktopDiffToolOpenResult = typeof DesktopDiffToolOpenResultSchema.Type;
+
+export type DesktopDiffToolEvent =
+  | {
+      readonly sessionId: string;
+      readonly type: "changed";
+      readonly path: string;
+      readonly contents: string;
+    }
+  | { readonly sessionId: string; readonly type: "closed" }
+  | { readonly sessionId: string; readonly type: "failed"; readonly message: string };
+
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
@@ -1216,6 +1249,9 @@ export interface DesktopBridge {
   receiveProviderAuthCallback: (authorizationUrl: string) => Promise<string>;
   cancelProviderAuthCallback: (authorizationUrl: string) => Promise<void>;
   startFileDrag: (input: { environmentId: EnvironmentId; path: string }) => Promise<boolean>;
+  /** Opens the files as a folder compare in the user's `git difftool`, on this machine. */
+  openDiffTool?: (input: DesktopDiffToolOpenInput) => Promise<DesktopDiffToolOpenResult>;
+  onDiffToolEvent?: (listener: (event: DesktopDiffToolEvent) => void) => () => void;
   openExternal: (url: string) => Promise<boolean>;
   /** Reads http(s) media in the main process, outside renderer CORS and CSP; null on network failure. */
   readMedia: (url: string) => Promise<DesktopMediaRead | null>;

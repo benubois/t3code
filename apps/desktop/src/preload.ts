@@ -260,6 +260,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   cancelProviderAuthCallback: (url: string) =>
     ipcRenderer.invoke(IpcChannels.CANCEL_PROVIDER_AUTH_CALLBACK_CHANNEL, url),
   startFileDrag: (input) => ipcRenderer.invoke(IpcChannels.START_FILE_DRAG_CHANNEL, input),
+  openDiffTool: (input) => ipcRenderer.invoke(IpcChannels.OPEN_DIFF_TOOL_CHANNEL, input),
+  onDiffToolEvent: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, diffToolEvent: unknown) => {
+      if (typeof diffToolEvent !== "object" || diffToolEvent === null) return;
+      listener(diffToolEvent as Parameters<typeof listener>[0]);
+    };
+    ipcRenderer.on(IpcChannels.DIFF_TOOL_EVENT_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.DIFF_TOOL_EVENT_CHANNEL, wrappedListener);
+    };
+  },
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
   readMedia: (url: string) => ipcRenderer.invoke(IpcChannels.READ_MEDIA_CHANNEL, url),
   checkSystemPermission: (pane: string) =>

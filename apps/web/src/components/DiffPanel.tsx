@@ -8,6 +8,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import {
+  AuthFilesystemWriteScope,
   CHECKPOINT_DIFF_TRUNCATED_MARKER,
   type ReviewBranchCommitsResult,
   type ScopedThreadRef,
@@ -26,6 +27,7 @@ import {
   ChevronRightIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
+  ExternalLinkIcon,
 } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
@@ -130,6 +132,8 @@ import {
   type TurnDiffSection,
 } from "@t3tools/client-runtime/state/thread-repositories";
 import { useOpenLink } from "../browser/useOpenLink";
+import { canOpenDiffTool, openDiffInDiffTool } from "../lib/diffTool";
+import { useEnvironmentScope } from "../state/session";
 
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
@@ -266,6 +270,11 @@ export default function DiffPanel({
   const activeThread = useQuietThreadShell(routeThreadRef);
   const fileAccess = useFilesystemReadAccess(activeThread?.environmentId ?? null, messages);
   const { canReadFiles } = fileAccess;
+  const canWriteFiles = useEnvironmentScope(
+    activeThread?.environmentId ?? null,
+    AuthFilesystemWriteScope,
+  );
+  const [openingDiffTool, setOpeningDiffTool] = useState(false);
   const activeProjectId = activeThread?.projectId ?? null;
   const activeProject = useProject(
     activeThread && activeProjectId
@@ -548,6 +557,22 @@ export default function DiffPanel({
 
   const threadFolderName = activeProject?.title ?? gt("Project folder");
   const preview = branchDiffPreview.data;
+  const diffToolFiles =
+    canOpenDiffTool() && isGitSelection && preview && selectedGitSource?.files
+      ? selectedGitSource.files.filter((file) => !hideTestFiles || !isTestChangedFile(file.path))
+      : [];
+  const openInDiffTool = () => {
+    if (!activeThread || !preview || !selectedGitSource || openingDiffTool) return;
+    setOpeningDiffTool(true);
+    void openDiffInDiffTool({
+      environmentId: activeThread.environmentId,
+      cwd: preview.cwd,
+      repositoryRoot: diffPathRepositoryRoot,
+      source: selectedGitSource,
+      files: diffToolFiles,
+      editable: selectedGitSource.kind !== "commit" && canWriteFiles,
+    }).finally(() => setOpeningDiffTool(false));
+  };
   const gitDiff = selectedGitSource?.diff;
 
   const toolCallPreview =
@@ -1403,6 +1428,29 @@ export default function DiffPanel({
             />
           </span>
         ) : null}
+        {diffToolFiles.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={gt("Open in diff tool")}
+                  disabled={openingDiffTool}
+                  onClick={openInDiffTool}
+                />
+              }
+            >
+              <ExternalLinkIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {selectedGitSource?.kind === "commit" || !canWriteFiles
+                ? gt("Open in diff tool (read-only)")
+                : gt("Open in diff tool")}
+            </TooltipPopup>
+          </Tooltip>
+        )}
         {canRefreshGitDiff && (
           <SharedTooltipTrigger
             render={

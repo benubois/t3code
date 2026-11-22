@@ -79,7 +79,10 @@ vi.mock("~/state/filesystem", () => ({
   useFilesystemReadAccess: () => ({ canReadFiles: true, isPending: false, error: null }),
   filesystemEnvironment: {},
 }));
-vi.mock("~/hooks/useThreadRouteTarget", () => ({ useThreadRouteRef: () => state.threadRef }));
+vi.mock("~/hooks/useThreadRouteTarget", () => ({
+  useThreadRouteRef: () => state.threadRef,
+  useThreadRouteTarget: () => null,
+}));
 vi.mock("~/hooks/useSettings", () => ({
   useClientSettings: (select: (settings: ClientSettings) => unknown) =>
     select({ ...DEFAULT_CLIENT_SETTINGS, diffFilesCollapsed: state.diffFilesCollapsed }),

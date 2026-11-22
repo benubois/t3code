@@ -157,3 +157,5 @@ export const COMPLETE_LEGACY_LOCAL_STORAGE_CHANNEL = "desktop:complete-legacy-lo
 export const RESTART_AUDIO_SERVICE_CHANNEL = "desktop:restart-audio-service";
 
 export const START_FILE_DRAG_CHANNEL = "desktop:start-file-drag";
+export const OPEN_DIFF_TOOL_CHANNEL = "desktop:open-diff-tool";
+export const DIFF_TOOL_EVENT_CHANNEL = "desktop:diff-tool-event";
