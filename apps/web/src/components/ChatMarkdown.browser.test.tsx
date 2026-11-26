@@ -1265,3 +1265,15 @@ describe("ChatMarkdown host media", () => {
     expect(screen.container.textContent).not.toContain("Retry video");
   });
 });
+
+it("renders an update link as the host's update, and as its text without a host", async () => {
+  setup();
+  const text = "[Update this Mac](t3-update:0.1.13)";
+  await using screen = await renderText(text, { environmentId: EnvironmentId.make("host") });
+  await expect.element(screen.getByText("Update T3 Code to 0.1.13 on its Mac")).toBeVisible();
+  expect(screen.container.querySelector("a")).toBeNull();
+
+  await screen.rerender(<ChatMarkdown cwd="/tmp/project" text={text} />);
+  await expect.element(screen.getByText("Update this Mac")).toBeVisible();
+  expect(screen.container.querySelector("a")).toBeNull();
+});

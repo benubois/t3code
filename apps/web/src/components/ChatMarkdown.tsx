@@ -93,6 +93,7 @@ import { parseComposerContextHref } from "@t3tools/shared/composerContextReferen
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { AssistantCitationEmbed } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
+import { MarkdownHostUpdate, parseHostUpdateHref } from "./chat/MarkdownHostUpdate";
 import { artifactTemplateFromHastProperties } from "@t3tools/shared/codexArtifactTemplates";
 import {
   decodeMarkdownLinkEscapes,
@@ -445,6 +446,7 @@ function markdownUrlTransform(href: string) {
   if (parseAssistantCitationHref(href)) return href;
   if (parseComposerContextHref(href)) return href;
   if (parseThreadLinkHref(href)) return href;
+  if (parseHostUpdateHref(href)) return href;
   if (isWindowsDrivePathHref(href)) return href;
   if (isLocalEditorFileHref(href)) return href;
   if (parseMarkdownSandboxFileLink(href)) return href;
@@ -1319,6 +1321,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
         />
       ) : (
         <span>{label ?? gt("Thread")}</span>
+      );
+    }
+    const hostUpdateVersion = href ? parseHostUpdateHref(href) : null;
+    if (hostUpdateVersion) {
+      return environmentId ? (
+        <MarkdownHostUpdate environmentId={environmentId} version={hostUpdateVersion} />
+      ) : (
+        <span>{children}</span>
       );
     }
     const contextReference = href ? parseComposerContextHref(href) : null;
